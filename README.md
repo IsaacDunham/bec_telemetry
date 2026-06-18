@@ -11,6 +11,7 @@ To generate this telemetry, I...
     2. accessing Microsoft Office on Google Chrome via [x-ms-RefreshTokenCredential](https://specterops.io/blog/2025/04/07/an-operators-guide-to-device-joined-hosts-and-the-prt-cookie/?source=rss----f05f8696e3cc---4#:~:text=RefreshTokenCredential)
     3. Creating mailbox forwarding and hiding rules in-line with what is commonly observed in business email compromise.
 
+# Do it Yourself!
 
 You can play with this data yourself in KQL with either your own own Microsoft tenant or a tool like [Kusto Explorer](https://learn.microsoft.com/en-us/kusto/tools/kusto-explorer). Once you have a KQL-queryable interface available to you, simply run the following KQL to set up dummy tables called `SigninLogs`, `OfficeActivity`, `AuditLogs`, and `AADNonInteractiveUserSignInLogs`:
 
@@ -24,3 +25,53 @@ let AADNonInteractiveUserSignInLogs=externaldata(TimeGenerated_raw:string,IPAddr
 ```
 
 With these set up, you should then be able to use `SigninLogs`, etc., and see the results from the sample data. 
+
+To see a rough high-level overview of everything, roughly when it happened, you can use the following query:
+
+``` kusto
+union withsource=SourceTable (SigninLogs | as SigninLogs), (AuditLogs | as AuditLogs), (AADNonInteractiveUserSignInLogs | as AADNonInteractiveUserSignInLogs), (OfficeActivity | as OfficeActivity)
+| extend When = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), CreatedDateTime, 
+    SourceTable in ("AuditLogs"), ActivityDateTime,
+    SourceTable in ("OfficeActivity"), Start_Time,
+    datetime(0)
+)
+| extend Whence = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), IPAddress,
+    SourceTable in ("OfficeActivity"), ClientIP,
+    SourceTable in ("AuditLogs"), InitiatedBy.user.ipAddress,
+    "n/a"
+)
+| extend Who = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), UserPrincipalName,
+    SourceTable in ("OfficeActivity"), UserId,
+    SourceTable in ("AuditLogs"), InitiatedBy.user.userPrincipalName,
+    "n/a"
+)
+| extend What = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs", "AuditLogs"), OperationName,
+    SourceTable in ("OfficeActivity"), Operation,
+    "n/a"
+)
+| extend How = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), AppDisplayName,
+    SourceTable in ("OfficeActivity"), ClientInfoString,
+    SourceTable in ("AuditLogs"), Identity,
+    "n/a"
+)
+| extend Target = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), ResourceDisplayName,
+    SourceTable in ("OfficeActivity"), OfficeObjectId,
+    SourceTable in ("AuditLogs"), substring(TargetResources, 0, 90),
+    "n/a"
+)
+| extend Result = case(
+    SourceTable in ("AADNonInteractiveUserSignInLogs", "SigninLogs"), ResultSignature,
+    SourceTable in ("OfficeActivity"), ResultStatus,
+    SourceTable in ("AuditLogs"), Result,
+    "n/a"
+)
+| project-reorder When, SourceTable, Whence, Who, What, How, Target, Result, IncomingTokenType
+| sort by When asc
+| where not (Whence has "192.168.1.1")
+```
