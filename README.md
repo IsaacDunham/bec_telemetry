@@ -26,6 +26,25 @@ let AADNonInteractiveUserSignInLogs=externaldata(TimeGenerated_raw:string,IPAddr
 
 With these set up, you should then be able to use `SigninLogs`, etc., and see the results from the sample data. 
 
+To see the mailbox rules that were created during the intrusion, with interesting fields parsed out, use the following query:
+
+``` kusto
+OfficeActivity
+| where Operation contains "rule"
+| mv-expand todynamic(Parameters)
+| summarize email_params = make_bag(pack(tostring(Parameters.Name), Parameters.Value)) by TimeGenerated, UserId, Operation
+| extend RuleName = email_params.Name,
+         Force = email_params.Force,
+         MoveToFolder = email_params.MoveToFolder,
+         SubjectContainsWords = email_params.SubjectContainsWords,
+         SentTo = email_params.SentTo,
+         From = email_params.From,
+         StopProcessRules = email_params.StopProcessingRules,
+         ForwardTo = email_params.ForwardTo,
+         MarkAsRead = email_params.MarkAsRead
+| project-reorder TimeGenerated, UserId, Operation, RuleName, MoveToFolder, From, SubjectContainsWords, SentTo, Force, StopProcessRules, ForwardTo, MarkAsRead, email_params
+```
+
 To see a rough high-level overview of everything, roughly when it happened, you can use the following query:
 
 ``` kusto
